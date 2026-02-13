@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import mimetypes
 import os
 from typing import Any
 
@@ -41,6 +42,25 @@ def detect_image_format(data: bytes) -> str | None:
         return None
     except Exception:
         return None
+
+
+def describe_uploaded_file_type(
+    *,
+    filename: str | None,
+    content_type: str | None,
+    detected_format: str | None,
+) -> str:
+    if detected_format:
+        return f"image/{detected_format.lower()}"
+
+    if content_type:
+        return content_type
+
+    guessed_type, _ = mimetypes.guess_type(filename or "")
+    if guessed_type:
+        return guessed_type
+
+    return "unknown"
 
 
 def build_model() -> None:
@@ -90,6 +110,7 @@ def not_jpg_response(
     filename: str | None,
     content_type: str | None,
     detected_format: str | None,
+    uploaded_file_type: str,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -99,6 +120,7 @@ def not_jpg_response(
             "filename": filename,
             "uploaded_content_type": content_type,
             "detected_format": detected_format,
+            "uploaded_file_type": uploaded_file_type,
         },
     )
 
@@ -168,9 +190,9 @@ def index() -> str:
 <body>
   <main class="card">
     <h1>JPG Image Classifier</h1>
-    <p class="small">Upload a JPG/JPEG image and get the top ImageNet predictions.</p>
+    <p class="small">Upload any file. If it is JPG/JPEG, the model will classify it.</p>
     <form id="upload-form">
-      <input id="file-input" type="file" accept=".jpg,.jpeg,image/jpeg" name="file" required />
+      <input id="file-input" type="file" name="file" required />
       <button type="submit">Upload & Classify</button>
     </form>
     <pre id="result">Waiting for upload...</pre>
@@ -236,14 +258,20 @@ async def predict(file: UploadFile | None = File(default=None)) -> JSONResponse:
 
     filename = file.filename or ""
     content_type = file.content_type
-
-    extension_ok = filename_is_jpg(filename)
-    mime_ok = content_type in ALLOWED_MIME_TYPES
     detected_format = detect_image_format(data)
+    uploaded_file_type = describe_uploaded_file_type(
+        filename=filename,
+        content_type=content_type,
+        detected_format=detected_format,
+    )
+
+    extension_or_mime_claims_jpg = filename_is_jpg(filename) or (
+        content_type in ALLOWED_MIME_TYPES
+    )
     decode_failed = detected_format is None
     detected_is_jpeg = detected_format == "JPEG"
 
-    if extension_ok and mime_ok and decode_failed:
+    if extension_or_mime_claims_jpg and decode_failed:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={
@@ -254,11 +282,12 @@ async def predict(file: UploadFile | None = File(default=None)) -> JSONResponse:
             },
         )
 
-    if not extension_ok or not mime_ok or not detected_is_jpeg:
+    if not detected_is_jpeg:
         return not_jpg_response(
             filename=filename,
             content_type=content_type,
             detected_format=detected_format,
+            uploaded_file_type=uploaded_file_type,
         )
 
     if not MODEL_STATE["loaded"]:
