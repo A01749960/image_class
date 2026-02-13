@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: jpg-image-classifier-api
+    env: python
+    plan: free
+    buildCommand: >
+      pip install -r requirements.txt &&
+      python -c "from torchvision.models import mobilenet_v3_small, MobileNet_V3_Small_Weights; mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.IMAGENET1K_V1)"
+    startCommand: uvicorn api_app_it:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
